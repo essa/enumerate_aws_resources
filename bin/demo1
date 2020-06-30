@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 require 'aws-sdk-ecs'
-
+require 'enumerate_aws_resources'
 
 def list_ecs_container_instances(client, cluster)
   puts "listing ec2_insntance_id of container instances of #{cluster}"
@@ -55,77 +55,8 @@ def list_ecs_services(client, cluster)
   end
 end
 
-class EnumerateAwsResources
-  def initialize(aws_client, *args, **options)
-    @aws_client = aws_client
-    @args = args
-    @list_max = options[:list_max] || 100
-    @describe_max = options[:describe_max] || 10
-  end
-
-  private
-  def _enumerate_arn(resource, *args, **options)
-    Enumerator.new do |y|
-      next_token = nil
-      loop do
-        resp = @aws_client.send(
-          list_method_name(resource),
-          options.merge(
-            next_token: next_token,
-            max_results: @list_max
-          )
-        )
-        resp.send(identifier_name(resource)).each(&y)
-        next_token = resp.next_token
-        break unless next_token
-      end
-    end
-  end
-
-  def pluralize(resource)
-    "#{resource}s"
-  end
-
-  def list_method_name(resource)
-    "list_#{pluralize(resource)}"
-  end
-
-  def describe_method_name(resource)
-    "describe_#{pluralize(resource)}"
-  end
-
-  def identifier_name(resource)
-    "#{resource}_arns"
-  end
-
-  def _enumerate(resource, *args, **options)
-    arns = _enumerate_arn(resource, *args, **options)
-    Enumerator.new do |y|
-      arns.each_slice(@describe_max) do |arns|
-        resp = @aws_client.send(
-          describe_method_name(resource),
-          options.merge({
-            pluralize(resource).to_sym => arns
-          })
-        )
-        resp.send(pluralize(resource)).each(&y)
-      end
-    end
-  end
-
-  def method_missing(sym, *args, **options)
-    case sym.to_s
-    when /^enumerate_(\w+)$/
-      _enumerate($1, *args, **options)
-    else
-      super
-    end
-  end
-
-end
-
 def demo(client, cluster)
-  e = EnumerateAwsResources.new(client, list_max: 3, describe_max: 2)
+  e = EnumerateAwsResources.new(client, list_max: 3, describe_max: 2, trace: false)
   puts "listing ec2_insntance_id of container instances of #{cluster} with this gem"
   puts e.enumerate_container_instance(cluster: cluster).map(&:ec2_instance_id)
 
@@ -139,6 +70,8 @@ unless cluster
   exit 1
 end
 client = Aws::ECS::Client.new
-list_ecs_container_instances(client, cluster)
-list_ecs_services(client, cluster)
+
+# list_ecs_container_instances(client, cluster)
+# list_ecs_services(client, cluster)
+
 demo(client, cluster)

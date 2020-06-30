@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+
+require 'aws-sdk-inspector'
+require 'enumerate_aws_resources'
+
+def get_last_run(client, template_arn)
+  filter = {
+    states: ['COMPLETED'],
+    completion_time_range: {
+      begin_date: '2020-01-01',
+      end_date: Time.now
+    }
+  }
+  enum = EnumerateAwsResources.new(
+    client, 
+    arn_attribute_name: 'assessment_run_arns',
+    list_max: 8,
+    describe_option: {},
+    trace: false
+  )
+  all_runs = enum.enumerate_assessment_run(template_arn, filter: filter)
+  all_runs.max_by { |run| run.completed_at }
+end
+
+def get_cve_findings(client, run_arn)
+  enum = EnumerateAwsResources.new(
+    client, 
+    arn_attribute_name: 'finding_arns',
+    describe_option: {},
+    trace: false
+  )
+  filter = {
+    severities: ['High'],
+    creation_time_range: {
+      begin_date: '2020-01-01',
+      end_date: Time.now
+    }, 
+  }
+  findings = enum.enumerate_finding(run_arn, filter: filter)
+  findings.select do |f|
+    rule = f.attributes[1].value
+    rule =~ /CVE/
+  end
+end
+
+template_arn = ARGV.shift
+unless template_arn
+  puts "usage: demo2 template_arn"
+  exit 1
+end
+client = Aws::Inspector::Client.new
+last_run = get_last_run(client, template_arn)
+p last_run.arn
+
+get_cve_findings(client, last_run.arn).each do |f|
+  puts "#{f.attributes[1].value} #{f.asset_attributes.agent_id}"
+end
